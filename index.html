@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>FAR(t) SPACE — Prototype v0.1</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #050713; font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; }
+  #wrap { position: fixed; inset: 0; background: radial-gradient(circle at 65% 35%, #172651 0%, #090d22 35%, #03040b 78%); }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+  .hud { position: absolute; left: 18px; top: 16px; display: grid; gap: 9px; min-width: 240px; pointer-events: none; text-shadow: 0 2px 12px rgba(0,0,0,.7); }
+  .title { font-size: 13px; letter-spacing: .18em; font-weight: 900; color: #e9f3ff; }
+  .stats { display: flex; gap: 16px; font-weight: 800; font-size: 13px; color: #d7e5ff; }
+  .bar { width: min(320px, 48vw); height: 12px; border: 1px solid rgba(255,255,255,.25); border-radius: 99px; overflow: hidden; background: rgba(0,0,0,.35); box-shadow: inset 0 0 10px rgba(0,0,0,.45); }
+  .bar > i { display:block; height:100%; width: 50%; background: linear-gradient(90deg,#6affc8,#d9ff6a); border-radius:inherit; transition: width .12s linear; }
+  .hint { font-size: 11px; opacity: .72; line-height: 1.35; max-width: 420px; }
+  #fartBtn { position: absolute; right: max(20px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); width: 96px; height: 96px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); background: radial-gradient(circle at 35% 30%, rgba(220,255,111,.95), rgba(84,185,110,.92) 42%, rgba(36,83,58,.95) 78%); color: #07140d; font-weight: 1000; letter-spacing: .08em; box-shadow: 0 12px 38px rgba(70,255,150,.18), inset 0 2px 15px rgba(255,255,255,.45); cursor: pointer; user-select:none; -webkit-tap-highlight-color: transparent; }
+  #fartBtn:active { transform: scale(.96); }
+  #overlay { position:absolute; inset:0; display:none; align-items:center; justify-content:center; background: rgba(3,5,12,.72); backdrop-filter: blur(6px); }
+  .card { width:min(520px, calc(100vw - 36px)); padding:30px; border:1px solid rgba(255,255,255,.16); border-radius:24px; background:linear-gradient(180deg,rgba(20,29,60,.96),rgba(6,10,25,.96)); box-shadow:0 30px 80px rgba(0,0,0,.5); text-align:center; }
+  .card h1 { margin:0 0 10px; font-size:36px; }
+  .card p { margin:8px 0; color:#bfd0ef; }
+  .card button { margin-top:18px; padding:13px 22px; border:0; border-radius:999px; background:#e8ff70; color:#0c1307; font-weight:900; cursor:pointer; }
+  #toast { position:absolute; left:50%; top:13%; transform:translate(-50%,-14px); opacity:0; padding:10px 16px; border-radius:999px; border:1px solid rgba(255,255,255,.18); background:rgba(9,14,31,.86); color:#eaf1ff; font-weight:800; font-size:12px; letter-spacing:.02em; transition: .25s ease; pointer-events:none; white-space:nowrap; }
+  #toast.show { opacity:1; transform:translate(-50%,0); }
+  .version { position:absolute; left:18px; bottom:14px; font-size:10px; opacity:.42; pointer-events:none; }
+  @media (max-width: 680px) { .hud{left:12px;top:10px;min-width:200px}.hint{max-width:250px}.stats{gap:10px;font-size:11px}.bar{width:52vw}#fartBtn{width:82px;height:82px;font-size:12px}.version{display:none} }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+  <div class="hud">
+    <div class="title">FAR(t) SPACE · PROTOTYPE v0.1</div>
+    <div class="stats"><span id="distance">0 km</span><span id="score">BIO 0</span><span id="best">BEST 0</span></div>
+    <div class="bar"><i id="gasBar"></i></div>
+    <div class="hint">Move your finger/mouse vertically. Collect food and particles. Avoid asteroids. Tap <b>FART</b> (or Space) to spend gas, surge forward and blast nearby debris.</div>
+  </div>
+  <button id="fartBtn" aria-label="Fart">FART</button>
+  <div id="toast"></div>
+  <div class="version">Offline-capable single-file browser prototype · progress/high score stored locally</div>
+  <div id="overlay"><div class="card"><h1>💥 SPLAT.</h1><p id="finalStats"></p><p id="evoText"></p><button id="restartBtn">EVOLVE AGAIN</button></div></div>
+</div>
+<script>
+(() => {
+'use strict';
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const distanceEl=document.getElementById('distance'),scoreEl=document.getElementById('score'),bestEl=document.getElementById('best'),gasBar=document.getElementById('gasBar'),fartBtn=document.getElementById('fartBtn'),overlay=document.getElementById('overlay'),finalStats=document.getElementById('finalStats'),evoText=document.getElementById('evoText'),restartBtn=document.getElementById('restartBtn'),toast=document.getElementById('toast');
+let W=0,H=0,DPR=1,last=0,running=true,pointerY=null,distance=0,biomass=0,gas=52,speed=220,surge=0,fartPulse=0,calm=0,spawnT=0,foodT=0,probeT=12;
+let best=Number(localStorage.getItem('fartspace_best')||0),codex=JSON.parse(localStorage.getItem('fartspace_codex')||'{}');bestEl.textContent=`BEST ${best}`;
+const player={x:150,y:300,vy:0,r:24,rot:0,hurt:0},objects=[],particles=[],stars=[];
+function resize(){DPR=Math.min(2,devicePixelRatio||1);W=innerWidth;H=innerHeight;canvas.width=Math.floor(W*DPR);canvas.height=Math.floor(H*DPR);ctx.setTransform(DPR,0,0,DPR,0,0);player.x=Math.max(95,Math.min(170,W*.16));if(!last)player.y=H/2;stars.length=0;for(let i=0;i<150;i++)stars.push({x:Math.random()*W,y:Math.random()*H,z:Math.random(),s:.4+Math.random()*1.8});}addEventListener('resize',resize);resize();
+const rnd=(a,b)=>a+Math.random()*(b-a),clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function toastMsg(msg){toast.textContent=msg;toast.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>toast.classList.remove('show'),2200)}
+function reset(){distance=0;biomass=0;gas=52;speed=220;surge=0;fartPulse=0;calm=0;spawnT=.6;foodT=.4;probeT=rnd(10,18);player.y=H/2;player.vy=0;player.rot=0;objects.length=0;particles.length=0;overlay.style.display='none';running=true;last=performance.now()}
+function spawnAsteroid(){const r=rnd(18,46);objects.push({type:'asteroid',x:W+r+30,y:rnd(55,H-55),r,vy:rnd(-12,12),rot:rnd(0,6.28),spin:rnd(-.7,.7),dead:false})}
+function spawnFood(){const q=Math.random(),type=q<.48?'particle':q<.76?'bean':q<.91?'chili':'taco',r=type==='particle'?8:type==='taco'?17:13;objects.push({type,x:W+40,y:rnd(70,H-70),r,phase:rnd(0,6.28),dead:false})}
+function spawnProbe(){objects.push({type:'voyager',x:W+90,y:rnd(120,H-120),r:25,phase:0,dead:false,seen:false})}
+function fart(){if(!running||gas<24){if(running)toastMsg('Not enough gas. Eat beans.');return}gas-=24;surge=1;fartPulse=1;calm=0;player.vy*=.55;for(const o of objects)if(o.type==='asteroid'){const dx=o.x-player.x,dy=o.y-player.y,d=Math.hypot(dx,dy);if(dx>-25&&dx<260&&d<285){o.x+=Math.max(40,260-d)*1.25;o.vy+=dy/(d||1)*120;o.rot+=1.4}}for(let i=0;i<34;i++)particles.push({x:player.x-20,y:player.y+rnd(-9,9),vx:rnd(-310,-90),vy:rnd(-85,85),life:rnd(.25,.8),size:rnd(2,8),kind:'gas'})}
+fartBtn.addEventListener('pointerdown',e=>{e.preventDefault();fart()});addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();fart()}if(!running&&(e.code==='Enter'||e.code==='Space'))reset()});restartBtn.onclick=reset;
+canvas.addEventListener('pointerdown',e=>{pointerY=e.clientY;canvas.setPointerCapture?.(e.pointerId)});canvas.addEventListener('pointermove',e=>{if(e.buttons||e.pointerType==='touch')pointerY=e.clientY});canvas.addEventListener('pointerup',()=>pointerY=null);canvas.addEventListener('pointercancel',()=>pointerY=null);
+function collect(o){o.dead=true;if(o.type==='particle'){biomass+=1;gas=clamp(gas+3,0,100)}if(o.type==='bean'){biomass+=4;gas=clamp(gas+18,0,100);toastMsg('BEANS → gas production ↑')}if(o.type==='chili'){biomass+=6;gas=clamp(gas+12,0,100);surge=Math.max(surge,.25);toastMsg('CHILI → volatile metabolism')}if(o.type==='taco'){biomass+=10;gas=clamp(gas+26,0,100);toastMsg('TACO → suspiciously efficient fuel')}for(let i=0;i<12;i++)particles.push({x:o.x,y:o.y,vx:rnd(-100,100),vy:rnd(-100,100),life:rnd(.3,.7),size:rnd(2,5),kind:'spark'})}
+function die(){running=false;best=Math.max(best,Math.floor(distance));localStorage.setItem('fartspace_best',String(best));bestEl.textContent=`BEST ${best}`;finalStats.textContent=`Distance ${Math.floor(distance)} km · Biomass ${biomass}`;evoText.textContent=`Current evolutionary direction: ${biomass<25?'Primitive cell':biomass<60?'Gas-adapted microbe':biomass<120?'Proto-cosmic organism':'Questionable lifeform'}`;overlay.style.display='flex'}
+function update(dt){if(!running)return;calm+=dt;surge=Math.max(0,surge-dt);fartPulse=Math.max(0,fartPulse-dt*2.4);const target=pointerY==null?player.y:pointerY,accel=(target-player.y)*11.5-player.vy*6.2;player.vy=clamp(player.vy+accel*dt,-360,360);player.y=clamp(player.y+player.vy*dt,36,H-36);player.rot+=(player.vy*.00065-player.rot)*dt*6;if(calm>4)gas=clamp(gas+dt*1.5,0,100);const worldSpeed=speed+Math.min(135,distance*.05)+(surge>0?170:0);distance+=worldSpeed*dt*.055;spawnT-=dt;foodT-=dt;probeT-=dt;if(spawnT<=0){spawnAsteroid();spawnT=rnd(.62,1.22)*Math.max(.55,1-distance/2500)}if(foodT<=0){spawnFood();foodT=rnd(.38,.9)}if(probeT<=0){spawnProbe();probeT=rnd(20,34)}for(const s of stars){s.x-=worldSpeed*dt*(.06+s.z*.36);if(s.x<-4){s.x=W+4;s.y=Math.random()*H}}for(const o of objects){o.x-=worldSpeed*dt*(o.type==='voyager'?.72:1);o.phase=(o.phase||0)+dt*2;if(o.type==='asteroid'){o.y+=o.vy*dt;o.rot+=o.spin*dt}const dx=o.x-player.x,dy=o.y-player.y,d=Math.hypot(dx,dy);if(o.type==='asteroid'&&d<o.r+player.r-5){if(surge>.22){o.x+=120;o.vy+=dy/(d||1)*190}else die()}else if(['particle','bean','chili','taco'].includes(o.type)&&d<o.r+player.r+5)collect(o);else if(o.type==='voyager'&&!o.seen&&Math.abs(dx)<110&&Math.abs(dy)<130){o.seen=true;if(!codex.voyager1){codex.voyager1=true;localStorage.setItem('fartspace_codex',JSON.stringify(codex));toastMsg('COSMIC CODEX: Voyager 1 discovered')}else toastMsg('Voyager 1 — previously catalogued')}if(o.x<-120)o.dead=true}for(let i=objects.length-1;i>=0;i--)if(objects[i].dead)objects.splice(i,1);for(const p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;p.vx*=.985;p.vy*=.985}for(let i=particles.length-1;i>=0;i--)if(particles[i].life<=0)particles.splice(i,1);distanceEl.textContent=`${Math.floor(distance).toLocaleString()} km`;scoreEl.textContent=`BIO ${biomass}`;gasBar.style.width=`${gas}%`}
+function blob(x,y,r,fill,stroke){ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=fill;ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=2;ctx.stroke()}}
+function drawAsteroid(o){ctx.save();ctx.translate(o.x,o.y);ctx.rotate(o.rot);ctx.beginPath();for(let i=0;i<9;i++){const a=i/9*Math.PI*2,rr=o.r*(.72+.28*Math.sin(i*12.93+o.r)),x=Math.cos(a)*rr,y=Math.sin(a)*rr;i?ctx.lineTo(x,y):ctx.moveTo(x,y)}ctx.closePath();const g=ctx.createRadialGradient(-o.r*.3,-o.r*.35,2,0,0,o.r);g.addColorStop(0,'#9e90a4');g.addColorStop(.45,'#665b72');g.addColorStop(1,'#332d42');ctx.fillStyle=g;ctx.fill();ctx.strokeStyle='rgba(255,255,255,.16)';ctx.stroke();blob(-o.r*.2,-o.r*.05,o.r*.18,'rgba(20,17,29,.35)');blob(o.r*.27,o.r*.18,o.r*.12,'rgba(20,17,29,.28)');ctx.restore()}
+function drawFood(o){ctx.save();ctx.translate(o.x,o.y+Math.sin(o.phase)*4);if(o.type==='particle'){blob(0,0,6,'#8fffe2');blob(0,0,2,'#fff')}if(o.type==='bean'){ctx.rotate(-.45);ctx.beginPath();ctx.ellipse(0,0,13,9,0,0,Math.PI*2);ctx.fillStyle='#86df72';ctx.fill();ctx.beginPath();ctx.ellipse(4,-2,8,4,0,0,Math.PI*2);ctx.fillStyle='#4b9f5f';ctx.fill()}if(o.type==='chili'){ctx.rotate(.7);ctx.beginPath();ctx.moveTo(-12,0);ctx.quadraticCurveTo(3,-11,14,1);ctx.quadraticCurveTo(4,11,-12,0);ctx.fillStyle='#ff6f66';ctx.fill();ctx.strokeStyle='#ffc168';ctx.stroke();ctx.fillStyle='#83df79';ctx.fillRect(-15,-2,5,4)}if(o.type==='taco'){ctx.beginPath();ctx.arc(0,2,15,Math.PI,0);ctx.lineTo(15,7);ctx.lineTo(-15,7);ctx.closePath();ctx.fillStyle='#f4cf66';ctx.fill();ctx.fillStyle='#82d96d';ctx.fillRect(-10,0,20,4);ctx.fillStyle='#ff7e61';ctx.fillRect(-7,3,14,3)}ctx.restore()}
+function drawVoyager(o){ctx.save();ctx.translate(o.x,o.y);ctx.rotate(-.13);ctx.strokeStyle='#b9c4d8';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-28,0);ctx.lineTo(26,0);ctx.stroke();ctx.fillStyle='#d7cda2';ctx.fillRect(-7,-6,18,12);ctx.beginPath();ctx.arc(-16,0,14,-.55,.55);ctx.strokeStyle='#dae2ef';ctx.lineWidth=2;ctx.stroke();ctx.beginPath();ctx.moveTo(-16,-7);ctx.lineTo(-30,-20);ctx.moveTo(-16,7);ctx.lineTo(-30,20);ctx.stroke();ctx.fillStyle='rgba(120,175,255,.18)';ctx.fillRect(11,-15,28,30);ctx.strokeRect(11,-15,28,30);ctx.restore();ctx.fillStyle='rgba(220,232,255,.75)';ctx.font='700 10px system-ui';ctx.fillText('VOYAGER 1',o.x-31,o.y-26)}
+function drawPlayer(){ctx.save();ctx.translate(player.x,player.y);ctx.rotate(player.rot);if(fartPulse>0){const rr=42+(1-fartPulse)*85;ctx.beginPath();ctx.arc(0,0,rr,0,Math.PI*2);ctx.strokeStyle=`rgba(170,255,135,${fartPulse*.45})`;ctx.lineWidth=5;ctx.stroke()}ctx.beginPath();ctx.moveTo(-19,4);ctx.quadraticCurveTo(-48,18,-55,0);ctx.quadraticCurveTo(-43,-11,-21,-8);ctx.fillStyle='rgba(98,226,188,.5)';ctx.fill();const g=ctx.createRadialGradient(-7,-10,3,0,0,28);g.addColorStop(0,'#9fffe7');g.addColorStop(.55,'#52d9b8');g.addColorStop(1,'#1c7e83');blob(0,0,player.r,g,'rgba(208,255,250,.55)');blob(-8,-6,6,'#f8fbff');blob(7,-7,7,'#f8fbff');blob(-7,-5,2.8,'#14243b');blob(8,-6,3,'#14243b');ctx.beginPath();ctx.arc(2,6,8,.2,Math.PI-.2);ctx.strokeStyle='#123c43';ctx.lineWidth=2;ctx.stroke();ctx.restore()}
+function draw(){ctx.clearRect(0,0,W,H);const ng=ctx.createRadialGradient(W*.72,H*.34,20,W*.72,H*.34,Math.max(W,H)*.55);ng.addColorStop(0,'rgba(77,105,194,.16)');ng.addColorStop(.45,'rgba(63,30,112,.08)');ng.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=ng;ctx.fillRect(0,0,W,H);for(const s of stars){ctx.globalAlpha=.25+s.z*.7;ctx.fillStyle=s.z>.7?'#dfeaff':'#9db0d8';ctx.fillRect(s.x,s.y,s.s,s.s)}ctx.globalAlpha=1;ctx.strokeStyle='rgba(130,160,255,.05)';ctx.lineWidth=1;for(let y=H*.2;y<H;y+=H*.2){ctx.beginPath();ctx.moveTo(0,y);ctx.quadraticCurveTo(W*.55,y-25,W,y+10);ctx.stroke()}for(const o of objects){if(o.type==='asteroid')drawAsteroid(o);else if(o.type==='voyager')drawVoyager(o);else drawFood(o)}for(const p of particles){ctx.globalAlpha=clamp(p.life/.65,0,1);blob(p.x,p.y,p.size,p.kind==='gas'?'#b8ff76':'#d9fbff')}ctx.globalAlpha=1;drawPlayer();if(calm>4){ctx.fillStyle='rgba(205,255,231,.55)';ctx.font='700 11px system-ui';ctx.fillText('CALM METABOLISM +GAS',18,H-38)}}
+function loop(t){let dt=(t-last)/1000;last=t;dt=Math.min(.034,Math.max(0,dt||0));update(dt);draw();requestAnimationFrame(loop)}reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
